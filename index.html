@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script type="text/javascript">
+   WebFontConfig = {
+     google: { families: [ 'Shojumaru::latin' ] },
+     active: function() { $(document).ready(startNewGame);}
+   };
+   (function() {
+     var wf = document.createElement('script');
+     wf.src = ('https:' == document.location.protocol ? 'https' : 'http') +
+       '://ajax.googleapis.com/ajax/libs/webfont/1/webfont.js';
+     wf.type = 'text/javascript';
+     wf.async = 'true';
+     var s = document.getElementsByTagName('script')[0];
+     s.parentNode.insertBefore(wf, s);
+   })();
+</script>
+<meta charset="utf-8" />
+<title>Neon Shade Tetris</title>
+
+<link rel="stylesheet" href="css/main.css" type="text/css" />
+<script src="jquery-1.7.2.min.js"></script>
+
+</head>
+
+<body id="index" class="home" style="background:black;color:white;text-align:center;">
+
+<header id="banner" class="body">
+    <h1 style="display:none">HTML5 Tetris</h1>
+</header>
+
+<canvas id="gameCanvas" width="600" height="640" style="background:black;border:1px solid gray;"></canvas>
+
+<script type="text/javascript">
+function create2DArray(x, y) {
+    array = new Array(x);
+    for (x0=0;x0<x;x0++) {
+        array[x0] = new Array(y);
+    }
+    return array;
+}
+
+function getBlockColor(block) {
+    for (x=0;x<block.length;x++) {
+        for (y=0;y<block[0].length;y++) {
+            if (block[x][y]) return block[x][y];
+        }
+    }
+}
+
+function rotate(block) {
+    rotatedBlock = create2DArray(block[0].length, block.length);
+    for (blockX=0;blockX<block.length;blockX++) {
+        for (blockY=0;blockY<block[0].length;blockY++) {
+            rotatedBlock[rotatedBlock.length - 1 - blockY][blockX] = block[blockX][blockY];
+        }
+    }
+    return rotatedBlock;
+}
+
+function handleKeyDown(event){
+    if (gameOver) {
+        if (event.which == keyCodes.space) {
+            startNewGame();
+            event.preventDefault();
+        }
+        return;
+    }
+    if (gamePaused && event.which != keyCodes.space) return;
+    switch (event.which) {
+        case keyCodes.up:
+            rotatedBlock = rotate(currentBlock);
+            if (blockFits(rotatedBlock, currentBlockX, currentBlockY)) currentBlock = rotatedBlock;
+            break;
+        case keyCodes.down:
+            if (!speedUpActive) {
+                sleepTime = baseSleepTime / speedUpMultiplier;
+                tick();
+                speedUpActive = true;
+            }
+            break;
+        case keyCodes.left:
+            if (blockFits(currentBlock, currentBlockX - 1, currentBlockY)) currentBlockX--;
+            break;
+        case keyCodes.right:
+            if (blockFits(currentBlock, currentBlockX + 1, currentBlockY)) currentBlockX++;
+            break;
+        case keyCodes.space:
+            gamePaused = !gamePaused;
+            paintSidebar();
+            break;
+        default:
+            return;
+    }
+    paintGrid();
+    paintCurrentBlock();
+    event.preventDefault();
+}
+
+function handleKeyUp(event) {
+    if (event.which == keyCodes.down && speedUpActive) {
+        sleepTime = baseSleepTime;
+        speedUpActive = false;
+    }
+}
+
+function blockFits(block, blockX, blockY) {
+    if (blockX < 0) return false;
+    if (blockX + block.length > grid.length) return false;
+    if (blockY + block[0].length > grid[0].length) return false;
+    for (x=0;x<block.length;x++) {
+        for (y=0;y<block[0].length;y++) {
+            if (block[x][y] && grid[blockX + x][blockY + y]) return false;
+        }
+    }
+    return true;
+}
+
+function lockDownCurrentBlock() {
+    for (x=0;x<currentBlock.length;x++) {
+        for (y=0;y<currentBlock[0].length;y++) {
+            if (currentBlock[x][y]) {
+                grid[currentBlockX + x][currentBlockY + y] = currentBlock[x][y];
+            }
+        }
+    }
+}
+
+function dropRow(row) {
+    for (y=row;y>0;y--) {
+        for (x=0;x<grid.length;x++) {
+            grid[x][y] = grid[x][y-1];
+        }
+    }
+}
+
+function decreaseSleepTime() {
+    baseSleepTime -= 4;
+    if (baseSleepTime < 1) sleepTime = 1;
+    sleepTime = baseSleepTime;
+    if (speedUpActive) sleepTime /= speedUpMultiplier;
+}
+
+function clearFullRows() {
+    for (y=currentBlockY;y<currentBlockY+currentBlock[0].length;y++) {
+        isFull = true;
+        for (x=0;x<grid.length;x++){
+            if (!grid[x][y]) {
+                isFull = false;
+                break;
+            }
+        }
+        if (isFull) {
+            score++;
+            decreaseSleepTime();
+            dropRow(y);
+        }
+    }
+    paintGrid();
+    paintSidebar();
+}
+
+function paintGrid() {
+    ctx.clearRect(0,0,400,canvas.height);
+    for (x=0;x<11;x++) {
+        for (y=0;y<20;y++) {
+            if (grid[x][y] && !gamePaused) {
+                ctx.fillStyle=grid[x][y];
+            }
+            else {
+                ctx.fillStyle=((x+y) % 2 == 0 ? gray : black);
+            }
+            ctx.fillRect(gridPositionX + x*squareSize, gridPositionY + y*squareSize, blockSize, blockSize);
+        }
+    }
+    if (gamePaused) {
+        ctx.shadowBlur = 10;
+        ctx.fillStyle = white;
+        ctx.font = '30px Shojumaru';
+        ctx.fillText("Paused", 180, 300);
+        ctx.shadowBlur = 0;
+    }
+    if (gameOver) paintGameOver();
+}
+
+function paintPlayPause() {
+    ctx.shadowBlur = 10;
+    ctx.font = '30px Shojumaru';
+    ctx.fillStyle = white;
+    if (gamePaused) {
+        ctx.fillText("Play", 470, 550);
+    } else {
+        ctx.fillText("Pause", 470, 550);
+    }
+    ctx.font = '15px Shojumaru';
+    ctx.fillText("(spacebar)", 470, 590);
+    ctx.shadowBlur = 0;    
+}
+
+function paintBlock(block, x0, y0) {
+    ctx.shadowColor = getBlockColor(block);
+    ctx.shadowBlur = 10;
+    for (x=0;x<block.length;x++) {
+        for (y=0;y<block[x].length;y++) {
+            if (block[x][y]) {
+                ctx.fillStyle = block[x][y];
+                ctx.fillRect(x0 + x*squareSize, y0 + y*squareSize, blockSize, blockSize);
+            }
+        }
+    }
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = teal;
+}
+
+function paintCurrentBlock() {
+    if (gamePaused || gameOver) return;
+    paintBlock(currentBlock, currentBlockX * squareSize + gridPositionX, currentBlockY * squareSize + gridPositionY);
+}
+
+function paintNextBlock() {
+    ctx.shadowBlur = 10;
+    ctx.font = '15px Shojumaru';
+    ctx.fillStyle = white;
+    ctx.fillText("Next block", 470, 370);
+        xCenterOffset = nextBlock.length * blockSize / 2;
+    paintBlock(nextBlock, 470 - xCenterOffset, 410);
+    ctx.shadowBlur = 0;
+}
+
+function paintScore() {
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = white;
+    ctx.font = '30px Shojumaru';
+    ctx.fillText("Score", 470, 170);
+    ctx.font = '60px Shojumaru';
+    ctx.fillText(score, 470, 210);
+    ctx.shadowBlur = 0;
+}
+
+function paintGameOver() {
+    ctx.shadowBlur = 10;
+    ctx.font = '30px Shojumaru';
+    ctx.fillStyle = white;
+    ctx.fillText("Game Over!", 180, 300);
+    ctx.clearRect(400, 540, 200, 50);
+    ctx.fillText("New game", 470, 550);
+    ctx.shadowBlur = 0;
+}
+
+function paintLogo() {
+    ctx.strokeStyle = white;
+    ctx.shadowBlur = 5;
+    ctx.font = '35px Shojumaru';
+    ctx.lineWidth = 3;
+    ctx.shadowColor = red;
+    ctx.strokeText("Neon", 470, 40);
+    ctx.shadowColor = green;
+    ctx.strokeText("Shade", 470, 70);
+    ctx.shadowColor = teal;
+    ctx.strokeText("Tetris", 470, 100);
+    ctx.shadowBlur = 0;
+}
+
+function paintSidebar() {
+    ctx.clearRect(400,0,200,canvas.height);
+    paintLogo();
+    paintScore();
+    paintNextBlock();
+    paintPlayPause();
+}
+
+function tick() {
+    if (blockFits(currentBlock, currentBlockX, currentBlockY + 1)) {
+        currentBlockY++;
+    }
+    else {
+        lockDownCurrentBlock();
+        clearFullRows();
+        currentBlock = nextBlock;
+        nextBlock = blocks[Math.floor(Math.random()*blocks.length)];
+        currentBlockX = 4;
+        currentBlockY = 0;
+        if (!blockFits(currentBlock, currentBlockX, currentBlockY)) {
+            gameOver = true;
+        }
+        paintSidebar();
+    }
+    paintGrid();
+    paintCurrentBlock();
+}
+
+function startNewGame() {
+    nextBlock = blocks[Math.floor(Math.random()*blocks.length)];
+    currentBlock = blocks[Math.floor(Math.random()*blocks.length)];
+    currentBlockX = 4;
+    currentBlockY = 0;
+
+    baseSleepTime = 500;
+    sleepTime = baseSleepTime;
+    score = 0;
+    gameOver = false;
+    gamePaused = false;
+    speedUpActive = false;
+    
+    grid = create2DArray(gridWidth,gridHeight);
+    
+    paintGrid();
+    paintSidebar();
+    run();
+}
+
+function run() {
+    if (!gamePaused) tick();
+    if (!gameOver) setTimeout("run()", sleepTime);
+}
+
+var red = "#BF3030";
+var orange = "#FF9640";
+var teal = "#33CCCC";
+var green = "#39E639";
+var purple = "#E6399B";
+var lime = "#B9F73E";
+var gray = "#222222";
+var black = "#000000";
+var white = "#FFFFFF";
+var yellow = "#FFFF40";
+
+var redBlock = [[null, red],
+                [red, red],
+                [null, red]];
+var orangeBlock = [[orange, null],
+                [orange, orange],
+                [null, orange]];
+var tealBlock = [[teal, teal],
+                [teal, null],
+                [teal, null]];
+var greenBlock = [[null, green],
+                [green, green],
+                [green, null]];
+var purpleBlock = [[purple, null],
+                [purple,null],
+                [purple,purple]];
+var limeBlock = [[lime,lime,lime,lime]];
+var yellowBlock = [[yellow,yellow],
+            [yellow,yellow]];
+var blocks = [redBlock,orangeBlock,tealBlock,greenBlock,purpleBlock,limeBlock,yellowBlock];
+
+var canvas=document.getElementById("gameCanvas");
+var ctx=canvas.getContext("2d");
+ctx.textAlign = "center";
+ctx.textBaseline = 'top';
+
+var keyCodes = {up:38, down:40, left:37, right:39, space:32 };
+var speedUpMultiplier = 9;
+
+var gridPositionX = 20;
+var gridPositionY = 20;
+var squareSize = 30;
+var blockSize = squareSize - 2;
+var gridWidth = 11;
+var gridHeight = 20;
+var grid;
+
+var currentBlock;
+var currentBlockX;
+var currentBlockY;
+var nextBlock;
+
+var speedUpActive;
+var baseSleepTime;
+var sleepTime;
+var score;
+var gameOver;
+var gamePaused;
+
+$(document).keydown(handleKeyDown);
+$(document).keyup(handleKeyUp);
+
+</script>
+
+</body>
+</html>
